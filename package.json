@@ -1,0 +1,21 @@
+{
+  "name": "akio-scraper",
+  "version": "1.0.0",
+  "description": "Server for distributing React applications",
+  "main": "app.js",
+  "bin": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "build:win":"pkg --targets node16-win-x64 .",
+    "build:mac":"pkg --targets node16-macos-x64 ."
+  },
+  "pkg": {
+    "assets": [
+      "build/**/*"
+    ],
+    "output": "dist"
+  },
+  "dependencies": {
+    "express": "^4.17.1"
+  }
+}
