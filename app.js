@@ -4,35 +4,57 @@ const { exec, spawn } = require('child_process');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// akio-local-engineのプロセス変数（グローバルに保持して後で終了できるようにする）
-let flaskProcess;
+// APIサーバーのプロセス変数（グローバルに保持して後で終了できるようにする）
+let apiProcess;
 
-// akio-local-engineを起動する関数
-function startFlaskServer() {
-  console.log('APIサーバー（akio-local-engine）を起動しています...');
+// APIサーバーを起動する関数
+function startAPIServer() {
+  console.log('APIサーバーを起動しています...');
   
-  // コマンドプロンプトを表示せずにakio-local-engineを起動するオプション
-  const options = {
-    // 標準出力とエラー出力を親プロセスに表示
-    stdio: 'inherit',
-    // コマンドプロンプト（新しいウィンドウ）を表示しないためのオプション
-    windowsHide: true,
-    // シェルを使わない（これもウィンドウを表示しないために重要）
-    shell: false
-  };
+  // Windows か macOS かを判定
+  const isWindows = process.platform === 'win32';
+  const isMac = process.platform === 'darwin';
   
-  // akio-local-engineのプロセスを起動
-  flaskProcess = spawn('./api/akio-local-engine', [], options);
+  let command, args, options;
+  
+  if (isWindows) {
+    // Windows環境
+    command = './api/akio-local-engine.exe';
+    args = [];
+    options = {
+      stdio: 'inherit',
+      windowsHide: true,
+      shell: false
+    };
+  } else if (isMac) {
+    // macOS環境
+    command = './api/akio-local-engine';  // macOS用の実行ファイル
+    args = [];
+    options = {
+      stdio: 'inherit',
+      shell: false
+    };
+  } else {
+    console.error('サポートされていないOS環境です');
+    process.exit(1);
+  }
+  
+  // APIサーバープロセスを起動
+  console.log(`APIサーバーを起動: ${command} ${args.join(' ')}`);
+  apiProcess = spawn(command, args, options);
   
   // エラーハンドリング
-  flaskProcess.on('error', (err) => {
-    console.error('akio-local-engineの起動に失敗しました:', err);
+  apiProcess.on('error', (err) => {
+    console.error('APIサーバーの起動に失敗しました:', err);
+    console.error('Expressサーバーのみを起動します...');
+    startExpressServer();
   });
   
-  console.log('APIサーバー起動完了');
-  
-  // akio-local-engineの起動後にExpressサーバーを起動
-  startExpressServer();
+  // 正常に起動したらExpressサーバーを起動
+  setTimeout(() => {
+    console.log('APIサーバー起動完了');
+    startExpressServer();
+  }, 1000); // 1秒待機
 }
 
 // Expressサーバーを起動する関数
@@ -48,19 +70,20 @@ function startExpressServer() {
   // サーバー起動
   const server = app.listen(PORT, () => {
     console.log(`アプリケーションが http://localhost:${PORT} で起動しました`);
-    // ブラウザを自動で開く
-    exec(process.platform === 'win32' ? 
-      `start http://localhost:${PORT}` : 
-      (process.platform === 'darwin' ? 
-        `open http://localhost:${PORT}` : 
-        `xdg-open http://localhost:${PORT}`));
+    
+    // ブラウザを自動で開く (Windows/macOS)
+    if (process.platform === 'win32') {
+      exec(`start http://localhost:${PORT}`);
+    } else if (process.platform === 'darwin') {
+      exec(`open http://localhost:${PORT}`);
+    }
   });
   
   // プロセス終了時の処理を設定
   setupCleanupHandlers(server);
 }
 
-// プロセス終了時にakio-local-engineも終了させる処理を設定
+// プロセス終了時にAPIサーバーも終了させる処理を設定
 function setupCleanupHandlers(server) {
   // SIGINT (Ctrl+C) などのシグナルを受け取ったときの処理
   const cleanupAndExit = () => {
@@ -70,22 +93,22 @@ function setupCleanupHandlers(server) {
     server.close(() => {
       console.log('Expressサーバーを終了しました');
       
-      // akio-local-engineを終了
-      if (flaskProcess) {
-        // Windows環境ではkillが効かない場合があるので、taskkillコマンドも実行
+      // APIサーバーを終了
+      if (apiProcess) {
         if (process.platform === 'win32') {
-          exec(`taskkill /pid ${flaskProcess.pid} /f /t`, (error) => {
+          // Windows環境
+          exec(`taskkill /pid ${apiProcess.pid} /f /t`, (error) => {
             if (error) {
-              console.error('akio-local-engineの終了に失敗しました:', error);
+              console.error('APIサーバーの終了に失敗しました:', error);
             } else {
-              console.log('akio-local-engineを終了しました');
+              console.log('APIサーバーを終了しました');
             }
             process.exit(0);
           });
-        } else {
-          // Windows以外の環境
-          flaskProcess.kill();
-          console.log('akio-local-engineを終了しました');
+        } else if (process.platform === 'darwin') {
+          // macOS環境
+          apiProcess.kill('SIGTERM');
+          console.log('APIサーバーを終了しました');
           process.exit(0);
         }
       } else {
@@ -94,11 +117,11 @@ function setupCleanupHandlers(server) {
     });
   };
   
-  // 各種終了シグナルを捕捉
+  // 終了シグナルの捕捉
   process.on('SIGINT', cleanupAndExit);
   process.on('SIGTERM', cleanupAndExit);
   
-  // Windowsでの異常終了時
+  // Windows特有の終了シグナル
   if (process.platform === 'win32') {
     process.on('SIGBREAK', cleanupAndExit);
   }
@@ -110,5 +133,5 @@ function setupCleanupHandlers(server) {
   });
 }
 
-// akio-local-engineを先に起動
-startFlaskServer();
+// APIサーバーを先に起動
+startAPIServer();
